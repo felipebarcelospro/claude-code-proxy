@@ -192,8 +192,6 @@ app.post('/v1/messages', async (c) => {
                 const thoughtSignature = block.thought_signature ?? block.thoughtSignature
                 if (thoughtSignature) {
                   thoughtSignatures.set(block.id, thoughtSignature)
-                }
-                if (thoughtSignature) {
                   toolCall.thought_signature = thoughtSignature
                 }
                 toolCalls.push(toolCall)

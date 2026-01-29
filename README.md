@@ -188,7 +188,7 @@ npm publish
 ### Environment Variables
 
 - `CLAUDE_CODE_PROXY_API_KEY` - Bearer token for upstream API
-- `ANTHROPIC_PROXY_BASE_URL` - Upstream API URL (default: https://models.github.ai/inference)
+- `ANTHROPIC_PROXY_BASE_URL` - Upstream API URL (default: https://models.github.ai/inference; Gemini OpenAI-compatible example: https://generativelanguage.googleapis.com/v1beta/openai/)
 - `REASONING_MODEL` - Model for reasoning requests (default: openai/gpt-4.1)
 - `COMPLETION_MODEL` - Model for completion requests (default: openai/gpt-4.1)
 - `REASONING_MAX_TOKENS` - Max tokens for reasoning model (optional)
@@ -196,7 +196,6 @@ npm publish
 - `REASONING_EFFORT` - Reasoning effort level for reasoning model (optional, e.g., "low", "medium", "high")
 - `DEBUG` - Enable debug logging (default: false)
 - `PORT` - Server port for CLI mode (default: 3000)
-- `ANTHROPIC_PROXY_BASE_URL` can point to Gemini's OpenAI-compatible endpoint (for example `https://generativelanguage.googleapis.com/v1beta/openai/`)
 
 ### Cloudflare Workers Configuration
 
