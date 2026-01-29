@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { env } from 'hono/adapter'
 import { cors } from 'hono/cors'
-import { transformOpenAIToClaude, removeUriFormat } from './transform'
+import { transformOpenAIToClaude, removeUriFormat, transformOpenAIResponseToClaude, addThoughtSignaturesToToolResults } from './transform'
 
 const app = new Hono<{
   Bindings: {
@@ -74,6 +74,7 @@ app.post('/v1/messages', async (c) => {
 
     // Convert messages from Claude to OpenAI format for upstream API
     const messages: any[] = []
+    const thoughtSignatures = new Map<string, string>()
     
     // Add system messages
     if (claudeRequest.system) {
@@ -128,11 +129,16 @@ app.post('/v1/messages', async (c) => {
                 textParts.push(block.text)
               } else if (block.type === 'tool_result') {
                 // Tool results should be separate tool messages
-                toolResults.push({
+                const thoughtSignature = block.thought_signature || block.thoughtSignature || thoughtSignatures.get(block.tool_use_id)
+                const toolResult: any = {
                   role: 'tool',
                   content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content),
                   tool_call_id: block.tool_use_id
-                })
+                }
+                if (thoughtSignature) {
+                  toolResult.thought_signature = thoughtSignature
+                }
+                toolResults.push(toolResult)
               }
             }
             
@@ -176,9 +182,15 @@ app.post('/v1/messages', async (c) => {
                   type: 'function',
                   function: {
                     name: block.name,
-                    arguments: JSON.stringify(block.input)
+                    arguments: JSON.stringify(block.input),
+                    ...(block.thought_signature || block.thoughtSignature
+                      ? { thought_signature: block.thought_signature || block.thoughtSignature }
+                      : {})
                   }
                 })
+                if (block.thought_signature || block.thoughtSignature) {
+                  thoughtSignatures.set(block.id, block.thought_signature || block.thoughtSignature)
+                }
               }
             }
             
@@ -292,6 +304,10 @@ app.post('/v1/messages', async (c) => {
       body: JSON.stringify(openaiPayload)
     })
 
+    if (thoughtSignatures.size > 0) {
+      addThoughtSignaturesToToolResults(messages, thoughtSignatures)
+    }
+
     // Add X-Dropped-Params header if any params were dropped
     if (droppedParams.length > 0) {
       c.header('X-Dropped-Params', droppedParams.join(', '))
@@ -309,6 +325,9 @@ app.post('/v1/messages', async (c) => {
     if (!openaiPayload.stream) {
       debug('Processing non-streaming response...')
       const data: any = await openaiResponse.json()
+      if (thoughtSignatures.size > 0) {
+        transformOpenAIResponseToClaude(data, thoughtSignatures)
+      }
       debug('OpenAI response received, parsing...')
       debug('OpenAI response:', JSON.stringify(data, null, 2))
       if (data.error) {
@@ -329,21 +348,23 @@ app.post('/v1/messages', async (c) => {
         })
       }
       
-      if (openaiMessage.tool_calls) {
-        for (const toolCall of openaiMessage.tool_calls) {
-          // Handle both old and new o3 tool call formats
-          const toolId = toolCall.id || `tool_${Date.now()}`
-          const toolName = toolCall.function?.name || toolCall.name
-          const toolArguments = toolCall.function?.arguments || toolCall.arguments
-          
-          content.push({
-            type: 'tool_use',
-            id: toolId,
-            name: toolName,
-            input: typeof toolArguments === 'string' ? JSON.parse(toolArguments) : toolArguments
-          })
+        if (openaiMessage.tool_calls) {
+          for (const toolCall of openaiMessage.tool_calls) {
+            // Handle both old and new o3 tool call formats
+            const toolId = toolCall.id || `tool_${Date.now()}`
+            const toolName = toolCall.function?.name || toolCall.name
+            const toolArguments = toolCall.function?.arguments || toolCall.arguments
+            const toolThoughtSignature = toolCall.function?.thought_signature || toolCall.thought_signature
+            
+            content.push({
+              type: 'tool_use',
+              id: toolId,
+              name: toolName,
+              input: typeof toolArguments === 'string' ? JSON.parse(toolArguments) : toolArguments,
+              ...(toolThoughtSignature ? { thought_signature: toolThoughtSignature } : {})
+            })
+          }
         }
-      }
       
       const claudeResponse = {
         id: data.id ? data.id.replace('chatcmpl', 'msg') : 'msg_' + Math.random().toString(36).substring(2, 26),
@@ -545,6 +566,7 @@ app.post('/v1/messages', async (c) => {
                         // Handle both old and new o3 tool call formats
                         const toolId = toolCall.id || `tool_${Date.now()}_${idx}`
                         const toolName = toolCall.function?.name || toolCall.name
+                        const toolThoughtSignature = toolCall.function?.thought_signature || toolCall.thought_signature
                         sendSSE('content_block_start', {
                           type: 'content_block_start',
                           index: idx,
@@ -552,7 +574,8 @@ app.post('/v1/messages', async (c) => {
                             type: 'tool_use',
                             id: toolId,
                             name: toolName,
-                            input: {}
+                            input: {},
+                            ...(toolThoughtSignature ? { thought_signature: toolThoughtSignature } : {})
                           }
                         })
                       }
