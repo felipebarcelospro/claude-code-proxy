@@ -10,6 +10,7 @@ A proxy service that translates between Anthropic's Claude API format and OpenAI
 - **Multiple Deployment Options**: Cloudflare Workers, Docker, or npm package
 - **CLI Interface**: Standalone executable with version and help flags
 - **Model Routing**: Dynamic model selection for reasoning vs completion tasks
+- **Gemini 3 Tool Calls**: Preserves `thought_signature` fields for Gemini 3 tool usage
 
 ## Installation & Usage
 
@@ -187,7 +188,7 @@ npm publish
 ### Environment Variables
 
 - `CLAUDE_CODE_PROXY_API_KEY` - Bearer token for upstream API
-- `ANTHROPIC_PROXY_BASE_URL` - Upstream API URL (default: https://models.github.ai/inference)
+- `ANTHROPIC_PROXY_BASE_URL` - Upstream API URL (default: https://models.github.ai/inference; Gemini OpenAI-compatible example: https://generativelanguage.googleapis.com/v1beta/openai/)
 - `REASONING_MODEL` - Model for reasoning requests (default: openai/gpt-4.1)
 - `COMPLETION_MODEL` - Model for completion requests (default: openai/gpt-4.1)
 - `REASONING_MAX_TOKENS` - Max tokens for reasoning model (optional)
