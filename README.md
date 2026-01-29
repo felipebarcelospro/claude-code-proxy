@@ -10,6 +10,7 @@ A proxy service that translates between Anthropic's Claude API format and OpenAI
 - **Multiple Deployment Options**: Cloudflare Workers, Docker, or npm package
 - **CLI Interface**: Standalone executable with version and help flags
 - **Model Routing**: Dynamic model selection for reasoning vs completion tasks
+- **Gemini 3 Tool Calls**: Preserves `thought_signature` fields for Gemini 3 tool usage
 
 ## Installation & Usage
 
@@ -195,6 +196,7 @@ npm publish
 - `REASONING_EFFORT` - Reasoning effort level for reasoning model (optional, e.g., "low", "medium", "high")
 - `DEBUG` - Enable debug logging (default: false)
 - `PORT` - Server port for CLI mode (default: 3000)
+- `ANTHROPIC_PROXY_BASE_URL` can point to Gemini's OpenAI-compatible endpoint (for example `https://generativelanguage.googleapis.com/v1beta/openai/`)
 
 ### Cloudflare Workers Configuration
 

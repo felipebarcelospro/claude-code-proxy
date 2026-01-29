@@ -72,8 +72,13 @@ app.post('/v1/messages', async (c) => {
     // The function name 'transformOpenAIToClaude' is misleading - it actually does Claude->OpenAI
     const { claudeRequest, droppedParams } = transformOpenAIToClaude(claudePayload)
 
+    const selectedModel = claudePayload.thinking ? models.reasoning : models.completion
+    const isO3Model = selectedModel && (selectedModel.includes('o3') || selectedModel.includes('gpt-5'))
+    const isGeminiModel = typeof selectedModel === 'string' && selectedModel.toLowerCase().includes('gemini')
+
     // Convert messages from Claude to OpenAI format for upstream API
     const messages: any[] = []
+    const thoughtSignatures = new Map<string, string>()
     
     // Add system messages
     if (claudeRequest.system) {
@@ -128,11 +133,16 @@ app.post('/v1/messages', async (c) => {
                 textParts.push(block.text)
               } else if (block.type === 'tool_result') {
                 // Tool results should be separate tool messages
-                toolResults.push({
+                const thoughtSignature = block.thought_signature ?? block.thoughtSignature ?? thoughtSignatures.get(block.tool_use_id)
+                const toolResult: any = {
                   role: 'tool',
                   content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content),
                   tool_call_id: block.tool_use_id
-                })
+                }
+                if (isGeminiModel && thoughtSignature) {
+                  toolResult.thought_signature = thoughtSignature
+                }
+                toolResults.push(toolResult)
               }
             }
             
@@ -171,14 +181,22 @@ app.post('/v1/messages', async (c) => {
               if (block.type === 'text') {
                 textParts.push(block.text)
               } else if (block.type === 'tool_use') {
-                toolCalls.push({
+                const toolCall: any = {
                   id: block.id,
                   type: 'function',
                   function: {
                     name: block.name,
                     arguments: JSON.stringify(block.input)
                   }
-                })
+                }
+                const thoughtSignature = block.thought_signature ?? block.thoughtSignature
+                if (thoughtSignature) {
+                  thoughtSignatures.set(block.id, thoughtSignature)
+                }
+                if (thoughtSignature) {
+                  toolCall.thought_signature = thoughtSignature
+                }
+                toolCalls.push(toolCall)
               }
             }
             
@@ -219,9 +237,6 @@ app.post('/v1/messages', async (c) => {
         },
       }))
 
-    const selectedModel = claudePayload.thinking ? models.reasoning : models.completion
-    const isO3Model = selectedModel && (selectedModel.includes('o3') || selectedModel.includes('gpt-5'))
-    
     const openaiPayload: any = {
       // Existing fields kept as before
 
@@ -335,12 +350,17 @@ app.post('/v1/messages', async (c) => {
           const toolId = toolCall.id || `tool_${Date.now()}`
           const toolName = toolCall.function?.name || toolCall.name
           const toolArguments = toolCall.function?.arguments || toolCall.arguments
+          const thoughtSignature = toolCall.thought_signature ?? toolCall.function?.thought_signature
+          if (thoughtSignature) {
+            thoughtSignatures.set(toolId, thoughtSignature)
+          }
           
           content.push({
             type: 'tool_use',
             id: toolId,
             name: toolName,
-            input: typeof toolArguments === 'string' ? JSON.parse(toolArguments) : toolArguments
+            input: typeof toolArguments === 'string' ? JSON.parse(toolArguments) : toolArguments,
+            ...(thoughtSignature ? { thought_signature: thoughtSignature } : {})
           })
         }
       }
@@ -545,6 +565,10 @@ app.post('/v1/messages', async (c) => {
                         // Handle both old and new o3 tool call formats
                         const toolId = toolCall.id || `tool_${Date.now()}_${idx}`
                         const toolName = toolCall.function?.name || toolCall.name
+                        const thoughtSignature = toolCall.thought_signature ?? toolCall.function?.thought_signature
+                        if (thoughtSignature) {
+                          thoughtSignatures.set(toolId, thoughtSignature)
+                        }
                         sendSSE('content_block_start', {
                           type: 'content_block_start',
                           index: idx,
@@ -552,7 +576,8 @@ app.post('/v1/messages', async (c) => {
                             type: 'tool_use',
                             id: toolId,
                             name: toolName,
-                            input: {}
+                            input: {},
+                            ...(thoughtSignature ? { thought_signature: thoughtSignature } : {})
                           }
                         })
                       }
