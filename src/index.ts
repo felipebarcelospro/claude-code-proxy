@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { env } from 'hono/adapter'
 import { cors } from 'hono/cors'
-import { transformOpenAIToClaude, removeUriFormat } from './transform'
+import { transformOpenAIToClaude, removeUriFormat, addThoughtSignaturesToToolResults } from './transform'
 
 const app = new Hono<{
   Bindings: {
@@ -74,6 +74,7 @@ app.post('/v1/messages', async (c) => {
 
     // Convert messages from Claude to OpenAI format for upstream API
     const messages: any[] = []
+    const thoughtSignatures = new Map<string, string>()
     
     // Add system messages
     if (claudeRequest.system) {
@@ -128,11 +129,16 @@ app.post('/v1/messages', async (c) => {
                 textParts.push(block.text)
               } else if (block.type === 'tool_result') {
                 // Tool results should be separate tool messages
-                toolResults.push({
+                const thoughtSignature = block.thought_signature || block.thoughtSignature || thoughtSignatures.get(block.tool_use_id)
+                const toolResult: any = {
                   role: 'tool',
                   content: typeof block.content === 'string' ? block.content : JSON.stringify(block.content),
                   tool_call_id: block.tool_use_id
-                })
+                }
+                if (thoughtSignature) {
+                  toolResult.thought_signature = thoughtSignature
+                }
+                toolResults.push(toolResult)
               }
             }
             
@@ -176,9 +182,15 @@ app.post('/v1/messages', async (c) => {
                   type: 'function',
                   function: {
                     name: block.name,
-                    arguments: JSON.stringify(block.input)
+                    arguments: JSON.stringify(block.input),
+                    ...(block.thought_signature || block.thoughtSignature
+                      ? { thought_signature: block.thought_signature || block.thoughtSignature }
+                      : {})
                   }
                 })
+                if (block.thought_signature || block.thoughtSignature) {
+                  thoughtSignatures.set(block.id, block.thought_signature || block.thoughtSignature)
+                }
               }
             }
             
@@ -205,6 +217,10 @@ app.post('/v1/messages', async (c) => {
           }
         }
       }
+    }
+
+    if (thoughtSignatures.size > 0) {
+      addThoughtSignaturesToToolResults(messages, thoughtSignatures)
     }
 
     // Process tools
@@ -335,12 +351,14 @@ app.post('/v1/messages', async (c) => {
           const toolId = toolCall.id || `tool_${Date.now()}`
           const toolName = toolCall.function?.name || toolCall.name
           const toolArguments = toolCall.function?.arguments || toolCall.arguments
+          const toolThoughtSignature = toolCall.function?.thought_signature || toolCall.thought_signature
           
           content.push({
             type: 'tool_use',
             id: toolId,
             name: toolName,
-            input: typeof toolArguments === 'string' ? JSON.parse(toolArguments) : toolArguments
+            input: typeof toolArguments === 'string' ? JSON.parse(toolArguments) : toolArguments,
+            ...(toolThoughtSignature ? { thought_signature: toolThoughtSignature } : {})
           })
         }
       }
@@ -545,6 +563,7 @@ app.post('/v1/messages', async (c) => {
                         // Handle both old and new o3 tool call formats
                         const toolId = toolCall.id || `tool_${Date.now()}_${idx}`
                         const toolName = toolCall.function?.name || toolCall.name
+                        const toolThoughtSignature = toolCall.function?.thought_signature || toolCall.thought_signature
                         sendSSE('content_block_start', {
                           type: 'content_block_start',
                           index: idx,
@@ -552,7 +571,8 @@ app.post('/v1/messages', async (c) => {
                             type: 'tool_use',
                             id: toolId,
                             name: toolName,
-                            input: {}
+                            input: {},
+                            ...(toolThoughtSignature ? { thought_signature: toolThoughtSignature } : {})
                           }
                         })
                       }

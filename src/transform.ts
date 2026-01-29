@@ -444,6 +444,4 @@ export function addThoughtSignaturesToToolResults(messages: any[], thoughtSignat
       }
     }
   }
-
-  }
 }
