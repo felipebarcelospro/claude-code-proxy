@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { env } from 'hono/adapter'
 import { cors } from 'hono/cors'
-import { transformOpenAIToClaude, removeUriFormat, transformOpenAIResponseToClaude, addThoughtSignaturesToToolResults } from './transform'
+import { transformOpenAIToClaude, removeUriFormat, addThoughtSignaturesToToolResults } from './transform'
 
 const app = new Hono<{
   Bindings: {
@@ -219,6 +219,10 @@ app.post('/v1/messages', async (c) => {
       }
     }
 
+    if (thoughtSignatures.size > 0) {
+      addThoughtSignaturesToToolResults(messages, thoughtSignatures)
+    }
+
     // Process tools
     const tools = (claudeRequest.tools || [])
       .filter((tool: any) => !['BatchTool'].includes(tool.name))
@@ -304,10 +308,6 @@ app.post('/v1/messages', async (c) => {
       body: JSON.stringify(openaiPayload)
     })
 
-    if (thoughtSignatures.size > 0) {
-      addThoughtSignaturesToToolResults(messages, thoughtSignatures)
-    }
-
     // Add X-Dropped-Params header if any params were dropped
     if (droppedParams.length > 0) {
       c.header('X-Dropped-Params', droppedParams.join(', '))
@@ -325,9 +325,6 @@ app.post('/v1/messages', async (c) => {
     if (!openaiPayload.stream) {
       debug('Processing non-streaming response...')
       const data: any = await openaiResponse.json()
-      if (thoughtSignatures.size > 0) {
-        transformOpenAIResponseToClaude(data, thoughtSignatures)
-      }
       debug('OpenAI response received, parsing...')
       debug('OpenAI response:', JSON.stringify(data, null, 2))
       if (data.error) {
@@ -348,23 +345,23 @@ app.post('/v1/messages', async (c) => {
         })
       }
       
-        if (openaiMessage.tool_calls) {
-          for (const toolCall of openaiMessage.tool_calls) {
-            // Handle both old and new o3 tool call formats
-            const toolId = toolCall.id || `tool_${Date.now()}`
-            const toolName = toolCall.function?.name || toolCall.name
-            const toolArguments = toolCall.function?.arguments || toolCall.arguments
-            const toolThoughtSignature = toolCall.function?.thought_signature || toolCall.thought_signature
-            
-            content.push({
-              type: 'tool_use',
-              id: toolId,
-              name: toolName,
-              input: typeof toolArguments === 'string' ? JSON.parse(toolArguments) : toolArguments,
-              ...(toolThoughtSignature ? { thought_signature: toolThoughtSignature } : {})
-            })
-          }
+      if (openaiMessage.tool_calls) {
+        for (const toolCall of openaiMessage.tool_calls) {
+          // Handle both old and new o3 tool call formats
+          const toolId = toolCall.id || `tool_${Date.now()}`
+          const toolName = toolCall.function?.name || toolCall.name
+          const toolArguments = toolCall.function?.arguments || toolCall.arguments
+          const toolThoughtSignature = toolCall.function?.thought_signature || toolCall.thought_signature
+          
+          content.push({
+            type: 'tool_use',
+            id: toolId,
+            name: toolName,
+            input: typeof toolArguments === 'string' ? JSON.parse(toolArguments) : toolArguments,
+            ...(toolThoughtSignature ? { thought_signature: toolThoughtSignature } : {})
+          })
         }
+      }
       
       const claudeResponse = {
         id: data.id ? data.id.replace('chatcmpl', 'msg') : 'msg_' + Math.random().toString(36).substring(2, 26),
